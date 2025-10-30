@@ -1,0 +1,446 @@
+---
+title: "Data Analysis (Prof. Ugo Ala) - R Practical 2"
+author: "alessandra, giorgia, francesca"
+date: "29-10-2025"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    keep_tex: true
+    toc: true
+    toc_depth: 2
+header-includes:
+  - \usepackage{fvextra}
+  - \usepackage{fancyhdr}
+  - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,breakanywhere=true,commandchars=\\\{\}}
+  - \fvset{breaklines=true, breakanywhere=true}
+  - \renewcommand{\contentsname}{Index}
+  - \AtBeginDocument{
+      \pagestyle{fancy}
+      \fancyhead[L]{}
+      \fancyhead[R]{}
+      \fancyhead[C]{Data Analysis - R Practical N - 01-01-0000 - Cognome N., Cognome N., Cognome N.}
+      \fancyfoot[C]{\thepage}
+      \renewcommand{\sectionmark}[1]{}
+      \renewcommand{\subsectionmark}[1]{}
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+\thispagestyle{empty}
+
+\newpage
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+
+###Recap esercitazione 1: Flow delle librerie di R per utilizzare il 16S. Avevamo il dato di input con tre dati principali: la matrice di abbondanza, i metadati che ci consentono di strutturare i gruppi e la classificazione tassonomica.
+###Abbiamo trovato:
+###Unknown
+###Confronto fra classificazione tassonomica attraverso i nostri tool di machine learning e BLAST: rispetto a BLAST che fa un semplice allineamento, i nostri tool di machine learning riescono a ricondurre dal phylum alla specie. La sequenza può essere poi troppo degenerata o troppo comune, ma comunque darà una famiglia. BLAST non lo fa. In ogni caso, BLAST rimane utile: se ho il 50% di unknown con il machine learning (banalmente perché gli algoritmi non vengono aggiornati da qualche anno), posso usare BLAST che viene aggiornato quotidianamente dall’NCBI.
+###L’output del BLAST è un lungo elenco di hit trovate. Il 16S è molto conservato sui batteri e contemporaneamente ha delle regioni ipervariabili per distinguerli: BLAST restituisce un elenco molto lungo mettendo tutte le specie a parimerito. Posso guardare se quelle specie appartengono allo stesso genere, così da ricompattare l’informazione al livello di genere.
+
+
+```{r, eval=T, echo=T}
+({
+   real_samples <- row.names(alpha)
+   metadata <- metadata[c(real_samples),]
+   metadata$shannon <- alpha$diversity_shannon
+   sampledata = sample_data(data.frame(metadata, row.names=sample_names(ps), stringsAsFactors=FALSE))
+   pseq1 = merge_phyloseq(ps, sampledata)
+   pseq1
+})
+```
+
+
+#BETA
+##Α vs β diversities:
+##Alpha: caratteristica propria di ogni sample
+##Beta: caratteristica di ogni coppia di samples -> in una correlazione perdo l’informazione dei metadati!!
+##I metadati riportano la classificazione dei vari samples. Una volta calcolata l’α diversity io posso vederla come una covariata e aggiungerla ai miei metadati. A questo punto chiedo ad R quali sono le misure di β diversities che posso avere:
+```{r, eval=T, echo=T}
+({
+   dist_methods <- unlist(distanceMethodList)
+print(dist_methods)
+
+})
+```
+```{r, eval=T, echo=T}
+({
+   dist = phyloseq::distance(pseq1, method="bray")
+   ordination = ordinate(pseq1, method="PCoA", distance=dist)
+plot_ordination(pseq1, ordination, color="Status", shape = "Condition") + 
+  theme(legend.position="right") +
+  theme(strip.background = element_blank())
+})
+```
+
+```{r, eval=T, echo=T}
+({
+   pcoa <- cmdscale(d = dist, k=2, eig = TRUE)
+plot(pcoa$points)
+})
+```
+```{r, eval=T, echo=T}
+({
+   pcoa_df <- data.frame(pcoa$points)
+colnames(pcoa_df) <- c("PCo1", "PCo2")
+})
+```
+##pcoa_df
+```{r, eval=T, echo=T}
+({
+   pcoa_df$condition <- factor(metadata$Status)
+pcoa_df$class <- factor(metadata$Condition)
+pcoa_df$shannon <- factor(metadata$shannon)
+})
+```
+###aggiungo delle covariante ai miei data iniziali per arricchire l'analisi che sto fcendo, semplicemente lo faccio fare ad R 
+```{r, eval=T, echo=T}
+({
+   calf <- ggplot(pcoa_df, aes(x = PCo1, y = PCo2)) + 
+  geom_point(aes(shape=condition, color=class, size=shannon)) +
+  xlab("PCo1") +
+  ylab("PCo2") + 
+  ggtitle("BrayCurtis") +
+  theme(legend.position="right") +
+  scale_color_brewer(palette = "Set1") +
+  theme_light() +
+  guides(size = "none")
+calf
+})
+```
+###Questo codice crea un plot simile ad una PCA, qualcosa legato al multi-dimensional scaling, qualcosa per ridurre le dimensioni.
+###Si stanno utilizzando due dei metadati che abbiamo: STATUS (healthy, blank e diseased) e CONDITION (blank e non blank (cosi riduco a due i test da confrontare, senza averne tre). Il codice prosegue cercando di arricchire questo primo plot. Fa un BrayCurtis aggiungendo delle covariate all’analisi. Restituisce un’informazione in più: ha associato l’alpha diversity: all’interno della stessa classe vedo dei samples con un alpha simile o molto distinte.
+###A questo punto posso cercare di raggruppare in cluster l’informazione ottenuta: vedo che gli healthy sono raggruppati, mentre i diseased sono un po’ più sparsi (hanno una variabilità maggiore: con l’alpha questo NON era evidente, ma vedevamo con Chao1 quanti OTU avevo per sample. Se non ho significatività statistica (non ho variabilità) significava che il numero di OTU era simile. Il Chao1 però ha un limite: non valuta quanti sono in comune fra tutti i gruppi e quanti sono uguali fra quelli in comune —> LIMITE: Chao1 non differenzia ma dice solo quello che c’è). In questo caso in cui valuto beta diversities e valuto la distanza si valuta sia quanto c’è di simile sia quanto di dissimile. In questo caso avere due punti molto distanti significa avere un numero grande diOTU che li distinguono.
+###In questo caso, gli OTU dei healthy ha un gruppo di taxa molto simile; i diseased hanno più OTU che li distingue e quindi un maggior numero diverso di taxa. Il grafico di una normale PCA mostra come prima componente quella lungo cui i dati hanno più variabilità (varianza). In questo caso restituisce quali sono i taxa che spiegano la maggiore variabilità lungo la prima componente (immaginaria).
+#subsets for BETA DIVERSITY evaluation (as for ALPHA)
+
+```{r, eval=T, echo=T}
+({
+   library(usedist)
+dist1 <- dist_subset(dist, c(metadata$Condition == "NO_BLANK"))
+})
+```
+###dist1
+```{r, eval=T, echo=T}
+({
+  ordination = ordinate(pseq1, method="PCoA", distance=dist1)
+plot_ordination(pseq1, ordination, color="Status", shape = "Condition") + 
+  theme(legend.position="right") +
+  theme(strip.background = element_blank()) 
+})
+```
+```{r, eval=T, echo=T}
+({
+  pcoa1 <- cmdscale(d = dist1, k=2, eig = TRUE)
+})
+```
+##pcoa1
+##plot(pcoa1$points)
+##pcoa1_df
+```{r, eval=T, echo=T}
+({
+  pcoa1_df <- data.frame(pcoa1$points)
+colnames(pcoa1_df) <- c("PCo1", "PCo2")
+})
+```
+
+##meta
+```{r, eval=T, echo=T}
+({
+  meta <- subset(as.data.frame(metadata), c(metadata$Condition == "NO_BLANK"))
+})
+```
+
+
+##pcoa1_df
+```{r, eval=T, echo=T}
+({
+  pcoa1_df$condition <- factor(meta$Status)
+pcoa1_df$class <- factor(meta$Condition)
+pcoa1_df$shannon <- factor(meta$shannon)
+})
+```
+```{r, eval=T, echo=T}
+({
+  calf <- ggplot(pcoa1_df, aes(x = PCo1, y = PCo2)) + 
+  geom_point(aes(color=condition, size=shannon)) +
+  xlab("PCo1") +
+  ylab("PCo2") + 
+  ggtitle("BrayCurtis - Piemontese") +
+  theme(legend.position="right") +
+  scale_color_brewer(palette = "Set1") +
+  theme_light() +
+  guides(size = "none")
+calf
+})
+```
+
+#PERMANOVA
+###meta1
+```{r, eval=T, echo=T}
+({library("phyloseq")
+  psbeta1 <- subset_samples(pseq1, (Condition =='NO_BLANK'))
+meta1 <- data.frame(sample_data(psbeta1))
+})
+```
+```{r, eval=T, echo=T}
+({
+  ma1 <- psbeta1@otu_table
+mat1 <- t(ma1)
+})
+```
+###Manca ancora la statistica: vedo la differenza dal grafico, ma c’è significatività?
+###Con l’alpha: Wilkinson, t-test
+###Con il beta: PERMANOVA; anova basato sulle permutazioni. Devo valutare che NON ho l’indipendenza dei dati. Quindi calcolo l’alpha sperimentale specificando il numero di permutazioni che voglio fare:
+```{r, eval=T, echo=T}
+({
+  library(vegan)
+  test.adonis1 <- adonis2(mat1 ~ Status, data = meta1, permutation = 999, method = "bray")
+test.adonis1
+})
+```
+###Vedo le distanze all’interno del gruppo sano, poi all’interno del gruppo malati e infine la distanza media tra i due gruppi diversi. Mi immagino che ci sia una piccola distanza nel gruppo sani, una piccola distanza nel gruppo malati e una distanza sicuramente maggiore tra i malati e i sani.
+###Nel nostro plot precedente mi potrei aspettare una piccola distanza fra i sani ma una distanza grande nel gruppo diseased.
+###Tuttavia è importante valutare la diversità fra i sani e i malati e vedere se questa grande distanza rimane maggiore della grande variabilità (distanza) fra i malati. Tutto questo avviene lungo la PC1: la PC2 (i taxa 19 importanti in PC2) dicono invece che alcuni diseased sono caratterizzati fortemente per un taxa e un altro gruppo per un altro.
+###Il codice restituisce un p-value (chiamato F) di 0,34 quindi significativo.
+
+####(sono francesca) i prossimi codici sono diversi rispetto a quello del prof perchè la funzione adonis non funziona più da tempo, ho usato un altro metodo offerto da chatgpt 
+
+```{r, eval=T, echo=T}
+({
+permanova_cohort1 <- vegan::adonis2(mat1 ~ Status, data = meta1, permutations = 999)
+
+coef <- as.data.frame(permanova_cohort1)
+
+coef["Model", ]
+})
+```
+```{r, eval=T, echo=T}
+({
+  library(phyloseq)
+library(dplyr)
+library(tidyr)
+otu_mat <- as.data.frame(otu_table(ps))
+
+if (!taxa_are_rows(ps)) {
+  otu_mat <- t(otu_mat)
+}
+taxa_are_rows(ps)
+
+otu_mat <- as.data.frame(t(otu_table(ps)))  
+otu_mat$Status <- sample_data(ps)$Status    
+dim(otu_mat) 
+
+group_means <- otu_mat %>%
+  group_by(Status) %>%
+  summarise(across(where(is.numeric), mean))
+
+
+diffs <- (group_means[2,-1] - group_means[1,-1]) %>% unlist()
+top.coef <- sort(abs(diffs), decreasing = TRUE)[1:20]
+
+top_taxa <- names(top.coef)
+top_values <- diffs[top_taxa]
+
+top_taxa_coeffient_plot <- ggplot(data.frame(x = top_values,
+                                             y = factor(top_taxa, levels = top_taxa)),
+                                  aes(x = x, y = y)) +
+  geom_bar(stat="identity") +
+  labs(x="", y="", title="Top Taxa") +
+  theme_bw()
+
+top_taxa_coeffient_plot
+})
+```
+```{r, eval=T, echo=T}
+({
+  library(tidyr)
+library(dplyr)
+
+top_translate_sep <- top_translate %>%
+  separate(Taxon,
+           into = c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species"),
+           sep = "; ", fill = "right")
+
+})
+```
+```{r, eval=T, echo=T}
+({
+  top_taxa_coeffient_plot
+top.coef
+class(top.coef)
+top.coef <- as.data.frame(top.coef)
+row.names(top.coef)
+top.coef$names <- row.names(top.coef)
+top.coef
+})
+```
+```{r, eval=T, echo=T}
+({taxa_top <- tax
+taxa_top$names <- row.names(taxa_top)
+head(taxa_top)
+top_translate <- inner_join(top.coef, taxa_top)
+class(top_translate)
+top_translate
+})
+```
+
+```{r, eval=T, echo=T}
+({
+  top_taxa_coeffient_plot <- ggplot(data.frame(x = top_translate_sep$top.coef,
+                                             y = factor(top_translate_sep$Species)),
+                                  aes(x = x, y = y)) +
+  geom_bar(stat="identity") +
+  labs(x="", y="", title="Top_Taxa") +
+  theme_bw()
+top_taxa_coeffient_plot
+
+})
+```
+
+```{r, eval=T, echo=T}
+({
+  top_taxa_coeffient_plot <- ggplot(data.frame(x = top_translate_sep$top.coef,
+                                             y = factor(top_translate_sep$Genus)),
+                                  aes(x = x, y = y)) +
+  geom_bar(stat="identity") +
+  labs(x="", y="", title="Top_Taxa") +
+  theme_bw()
+top_taxa_coeffient_plot
+
+})
+```
+```{r, eval=T, echo=T}
+({
+  top_taxa_coeffient_plot <- ggplot(data.frame(x = top_translate_sep$top.coef,
+                                             y = factor(top_translate_sep$Family)),
+                                  aes(x = x, y = y)) +
+  geom_bar(stat="identity") +
+  labs(x="", y="", title="Top_Taxa") +
+  theme_bw()
+top_taxa_coeffient_plot
+})
+```
+###Restituisce taxa negativi (importanti in un gruppo) e positivi (importanti in un altro). Se la barra di un taxon ha una lunghezza simile sia in un gruppo che in un altro significa che quella famiglia è presente in entrambi i casi diseased e sani in ugual misura, quindi perdo un po’ di informazione cercando di raggruppare tutti i dati.
+
+##esercizio che non abbiamo fatto
+###hai usato BrayCurtis (mescola abbondanza e diversità in termini di abbondanza) ma usa Jaccard (simile al Chao1, non tiene contro dell’abbondanza ma vede semplicemente chi c’è e chi non c’è)
+
+#DIFFERENTIAL ABUNDANCE
+###Si ragiona in termini simili alla differential expression.
+###Quali sono i taxa che potenzialmente si comportano in maniera diversa?
+###Taxa per taxa, riesci a vedere un segnale che differenzia l’abbondanza?
+###Costruisci le tabelle non tenendo conto degli 0 (perché i test lavorano sui log e log0 è impossibile) ma creando pseudocounts, che significa aggiungere più uno a tutta la matrice. In termini di abbondanza non cambia nulla, ma se avessi avuto singletons e doubletons avrei shiftato troppo.
+###costruire le tabelle 
+```{r, eval=T, echo=T}
+({
+  library(DESeq2)
+ps
+ps@sam_data
+a <- ps@otu_table
+b <- ps@sam_data
+c <- ps@tax_table
+head(a)
+})
+```
+
+```{r, eval=T, echo=T}
+({
+  a[,] <- a[,] + 1
+a <- as.data.frame(a)
+head(a)
+})
+```
+```{r, eval=T, echo=T}
+({
+b <- as.data.frame(b)
+b
+head(b)
+})
+```
+```{r, eval=T, echo=T}
+({
+c <- as.data.frame(c)
+c
+})
+```
+###Il codice restituisce una statistica (un p-value) per ogni taxa. Ho anche, per ognuno, il fold change.Laddove non si riesce a calcolare è un problema di distribuzione dei dati
+```{r, eval=T, echo=T}
+({
+ds2 <- DESeqDataSetFromMatrix(countData=a, colData=b,
+                              design =~ Status)
+ds2
+ds2$Status
+})
+```
+###Does the analysis
+```{r, eval=T, echo=T}
+({dds <- DESeq(ds2)
+})
+```
+###Gets the results from the object
+```{r, eval=T, echo=T}
+({res <- results(dds)
+res
+})
+```
+###Abbiamo queste due grandi tipologie di analisi: una generale che arriva fino alle alpha e beta diversities e una più specifica che va a vedere il singolo taxa. A questo punto, ottenute le specie, generi, famiglie differenzialmente espressi (output di espressione differenziale) li caratterizzo funzionalmente. 
+###Si procede con un’analisi funzionale: un’analisi di tipo “enrichment” o di caratterizzazione biologica, in cui si utilizzano database come KEGG, GO (Gene Ontology), o simili, per identificare i pathway o i processi biologici in cui questi geni sono coinvolti. In pratica, cerchiamo di capire il contesto funzionale di questi geni: in quali vie metaboliche o processi partecipano, e quindi quale ambiente biologico rappresentano. Questo tipo di analisi ci permette di costruire un quadro interpretativo utile per formulare ipotesi su come i cambiamenti nell’espressione genica possano tradursi in fenotipi osservabili o effetti biologici più ampi.
+
+###Tuttavia, ci sono limiti importanti da considerare:
+##1.	Limiti metodologici del 16S
+##Con il sequenziamento del 16S non possiamo essere certi che le sequenze identificate corrispondano alle forme più comuni o attive del microorganismo (cioè, se sono vivi o morti: non sappiamo la vera attività di questi batteri). 
+##2.	Informazione limitata al solo gene 16S
+##Anche se identifichiamo una specie, dobbiamo ricordare che ogni specie può includere diversi ceppi con differenze genetiche e funzionali significative. Poiché il 16S rappresenta solo una piccola porzione del genoma, non possiamo sapere se quella specie ha subito mutazioni o variazioni nei geni che determinano la sua reale attività biologica. Con il 16s non sono sicuro che quella specie non sia stata già mutata prima in quel contesto.
+
+# Creates a data frame from results
+```{r, eval=T, echo=T}
+({
+df <- as.data.frame(res)
+df$FeatureID <- rownames(df)
+rownames(df)
+})
+```
+# Get taxonomy as a data.frame
+```{r, eval=T, echo=T}
+({
+tax <- as.data.frame(tax_table(ps))
+tax$FeatureID <- rownames(tax)
+head(tax)
+})
+```
+##Build two handy annotations:
+###BestName: the most specific available rank (Species→Genus→Family→…)
+###Taxon   : the full path "Kingdom; Phylum; Class; …"
+```{r, eval=T, echo=T}
+({rank_order <- c("Kingdom","Phylum","Class","Order","Family","Genus","Species")
+
+})
+```
+
+###Ensure missing ranks exist so coalesce works cleanly
+```{r, eval=T, echo=T}
+({for (r in rank_order) if (!r %in% names(tax)) tax[[r]] <- NA
+
+tax <- tax %>%
+  mutate(
+    BestName = coalesce(Species, Genus, Family, Order, Class, Phylum, Kingdom, FeatureID),
+    Taxon    = apply(select(., any_of(rank_order)), 1, function(x) paste(na.omit(x), collapse = "; "))
+  ) %>%
+  select(FeatureID, BestName, Taxon)
+})
+```
+
+###Join annotations onto DESeq2 results
+```{r, eval=T, echo=T}
+({res_annot <- df %>%
+  left_join(tax, by = "FeatureID") %>%
+  relocate(FeatureID, BestName, Taxon)
+
+head(res_annot)
+write.table(res_annot, file="DESeq_Results.txt", quote=FALSE, sep = "\t")
+})
+```
+
